@@ -1,0 +1,14 @@
+{
+  "name": "slack-ai-monitor",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@slack/bolt": "^3.17.0",
+    "@anthropic-ai/sdk": "^0.24.0",
+    "googleapis": "^140.0.0",
+    "node-cron": "^3.0.3"
+  }
+}
