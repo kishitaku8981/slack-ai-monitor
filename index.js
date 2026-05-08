@@ -98,11 +98,28 @@ async function addToSheet(data) {
 app.event('app_mention', async ({ event, client }) => {
   try {
     const text = event.text;
-    const userName = event.user;
-    const channelName = event.channel;
     const ts = event.ts;
-    const slackUrl = `https://slack.com/archives/${channelName}/p${ts.replace('.', '')}`;
+    const slackUrl = `https://slack.com/archives/${event.channel}/p${ts.replace('.', '')}`;
     const postDate = new Date(parseFloat(ts) * 1000).toLocaleDateString('ja-JP');
+
+    // ユーザー名を取得
+    let userName = event.user;
+    try {
+      const userInfo = await client.users.info({ user: event.user });
+      userName = userInfo.user.profile.display_name || userInfo.user.real_name || event.user;
+    } catch (e) {
+      console.error('ユーザー名取得エラー:', e.message);
+    }
+
+    // チャンネル名を取得
+    let channelName = event.channel;
+    try {
+      const channelInfo = await client.conversations.info({ channel: event.channel });
+      channelName = channelInfo.channel.name || event.channel;
+    } catch (e) {
+      console.error('チャンネル名取得エラー:', e.message);
+    }
+
     const analysis = await analyzeMessage(text, userName, channelName);
     if (analysis.needs_action) {
       await addToSheet({ postDate, channelName, userName, summary: analysis.summary, action: analysis.action, urgency: analysis.urgency, importance: analysis.importance, slackUrl, reason: analysis.reason });
@@ -119,11 +136,29 @@ app.event('message', async ({ event, client }) => {
     const keywords = ['確認お願い', '判断お願い', '承認お願い', '相談', 'クレーム', '緊急', '至急'];
     const hasKeyword = keywords.some(kw => text.includes(kw));
     if (!hasKeyword) return;
-    const userName = event.user;
-    const channelName = event.channel;
+
     const ts = event.ts;
-    const slackUrl = `https://slack.com/archives/${channelName}/p${ts.replace('.', '')}`;
+    const slackUrl = `https://slack.com/archives/${event.channel}/p${ts.replace('.', '')}`;
     const postDate = new Date(parseFloat(ts) * 1000).toLocaleDateString('ja-JP');
+
+    // ユーザー名を取得
+    let userName = event.user;
+    try {
+      const userInfo = await client.users.info({ user: event.user });
+      userName = userInfo.user.profile.display_name || userInfo.user.real_name || event.user;
+    } catch (e) {
+      console.error('ユーザー名取得エラー:', e.message);
+    }
+
+    // チャンネル名を取得
+    let channelName = event.channel;
+    try {
+      const channelInfo = await client.conversations.info({ channel: event.channel });
+      channelName = channelInfo.channel.name || event.channel;
+    } catch (e) {
+      console.error('チャンネル名取得エラー:', e.message);
+    }
+
     const analysis = await analyzeMessage(text, userName, channelName);
     if (analysis.needs_action) {
       await addToSheet({ postDate, channelName, userName, summary: analysis.summary, action: analysis.action, urgency: analysis.urgency, importance: analysis.importance, slackUrl, reason: analysis.reason });
