@@ -66,7 +66,8 @@ async function analyzeMessage(text, userName, channelName) {
     }]
   });
   const content = response.content[0].text;
-  return JSON.parse(content);
+  const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+return JSON.parse(cleaned);
 }
 
 async function addToSheet(data) {
