@@ -150,14 +150,15 @@ app.event('app_mention', async ({ event, client }) => {
   }
 });
 
-// キーワードを含む通常メッセージを監視
+// 木城さんへのメンション or キーワードを含むメッセージを監視
 app.event('message', async ({ event, client }) => {
   try {
     if (event.subtype || event.bot_id) return;
     const text = event.text || '';
     const keywords = ['確認お願い', '判断お願い', '承認お願い', '相談', 'クレーム', '緊急', '至急'];
     const hasKeyword = keywords.some(kw => text.includes(kw));
-    if (!hasKeyword) return;
+    const mentionsOwner = text.includes(`<@${NOTIFY_USER_ID}>`);
+    if (!hasKeyword && !mentionsOwner) return;
 
     const ts = event.ts;
     const slackUrl = `https://slack.com/archives/${event.channel}/p${ts.replace('.', '')}`;
@@ -168,7 +169,8 @@ app.event('message', async ({ event, client }) => {
       getChannelName(client, event.channel),
     ]);
 
-    console.log(`キーワード検知: ${channelName} / ${userName}`);
+    const trigger = mentionsOwner ? '木城さんへのメンション' : 'キーワード';
+    console.log(`${trigger}検知: ${channelName} / ${userName}`);
 
     const analysis = await analyzeMessage(text, userName, channelName);
     if (analysis.needs_action) {
