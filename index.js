@@ -1,9 +1,8 @@
-const { App } = require('@slack/bolt');
+const { App, ExpressReceiver } = require('@slack/bolt');
 const Anthropic = require('@anthropic-ai/sdk');
 const { google } = require('googleapis');
 const cron = require('node-cron');
 
-// 環境変数
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -11,16 +10,17 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const NOTIFY_USER_ID = process.env.NOTIFY_USER_ID;
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
 
-// Slack App初期化
-const app = new App({
-  token: SLACK_BOT_TOKEN,
+const receiver = new ExpressReceiver({
   signingSecret: SLACK_SIGNING_SECRET,
 });
 
-// Anthropic初期化
+const app = new App({
+  token: SLACK_BOT_TOKEN,
+  receiver,
+});
+
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
-// Google Sheets初期化
 function getSheetsClient() {
   const credentials = JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON);
   const auth = new google.auth.GoogleAuth({
@@ -30,7 +30,6 @@ function getSheetsClient() {
   return google.sheets({ version: 'v4', auth });
 }
 
-// AIでメッセージを判定
 async function analyzeMessage(text, userName, channelName) {
   const response = await anthropic.messages.create({
     model: 'claude-opus-4-5',
@@ -66,59 +65,36 @@ async function analyzeMessage(text, userName, channelName) {
 - 木城さんの対応が不要なもの`
     }]
   });
-
   const content = response.content[0].text;
   return JSON.parse(content);
 }
 
-// スプレッドシートに追記
 async function addToSheet(data) {
   const sheets = getSheetsClient();
-  
-  // 重複チェック
   const existing = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: 'タスク管理!A:P',
+    range: 'タスク管理!A:O',
   });
-  
   const rows = existing.data.values || [];
-  const isDuplicate = rows.some(row => row[14] === data.slackUrl);
+  const isDuplicate = rows.some(row => row[12] === data.slackUrl);
   if (isDuplicate) return false;
-
-  // 新しいIDを生成
   const id = rows.length;
-
   const now = new Date().toLocaleDateString('ja-JP');
   const values = [[
-    id,                    // ID
-    now,                   // 追加日
-    data.postDate,         // Slack投稿日
-    data.channelName,      // チャンネル名
-    data.userName,         // 投稿者
-    data.summary,          // 内容要約
-    data.action,           // やること
-    data.urgency,          // 緊急度
-    data.importance,       // 重要度
-    '未着手',              // ステータス
-    '',                    // 期限
-    '木城',                // 担当者
-    data.slackUrl,         // SlackリンクURL
-    now,                   // 最終更新日
-    data.reason,           // AI判定理由
+    id, now, data.postDate, data.channelName, data.userName,
+    data.summary, data.action, data.urgency, data.importance,
+    '未着手', '', '木城', data.slackUrl, now, data.reason,
   ]];
-
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
     range: 'タスク管理!A:O',
     valueInputOption: 'RAW',
     resource: { values },
   });
-
   return true;
 }
 
-// メンション検知
-app.event('app_mention', async ({ event, client }) => {
+app.event('app_mention', async ({ event }) => {
   try {
     const text = event.text;
     const userName = event.user;
@@ -126,65 +102,40 @@ app.event('app_mention', async ({ event, client }) => {
     const ts = event.ts;
     const slackUrl = `https://slack.com/archives/${channelName}/p${ts.replace('.', '')}`;
     const postDate = new Date(parseFloat(ts) * 1000).toLocaleDateString('ja-JP');
-
     const analysis = await analyzeMessage(text, userName, channelName);
-    
     if (analysis.needs_action) {
-      await addToSheet({
-        postDate,
-        channelName,
-        userName,
-        summary: analysis.summary,
-        action: analysis.action,
-        urgency: analysis.urgency,
-        importance: analysis.importance,
-        slackUrl,
-        reason: analysis.reason,
-      });
+      await addToSheet({ postDate, channelName, userName, summary: analysis.summary, action: analysis.action, urgency: analysis.urgency, importance: analysis.importance, slackUrl, reason: analysis.reason });
     }
   } catch (error) {
     console.error('メンション処理エラー:', error);
   }
 });
 
-// チャンネルメッセージ検知
-app.event('message', async ({ event, client }) => {
+app.event('message', async ({ event }) => {
   try {
     if (event.subtype || event.bot_id) return;
-    
     const text = event.text || '';
     const keywords = ['確認お願い', '判断お願い', '承認お願い', '相談', 'クレーム', '緊急', '至急'];
     const hasKeyword = keywords.some(kw => text.includes(kw));
-    
     if (!hasKeyword) return;
-
     const userName = event.user;
     const channelName = event.channel;
     const ts = event.ts;
     const slackUrl = `https://slack.com/archives/${channelName}/p${ts.replace('.', '')}`;
     const postDate = new Date(parseFloat(ts) * 1000).toLocaleDateString('ja-JP');
-
     const analysis = await analyzeMessage(text, userName, channelName);
-    
     if (analysis.needs_action) {
-      await addToSheet({
-        postDate,
-        channelName,
-        userName,
-        summary: analysis.summary,
-        action: analysis.action,
-        urgency: analysis.urgency,
-        importance: analysis.importance,
-        slackUrl,
-        reason: analysis.reason,
-      });
+      await addToSheet({ postDate, channelName, userName, summary: analysis.summary, action: analysis.action, urgency: analysis.urgency, importance: analysis.importance, slackUrl, reason: analysis.reason });
     }
   } catch (error) {
     console.error('メッセージ処理エラー:', error);
   }
 });
 
-// 毎日22時に通知
+receiver.app.get('/', (req, res) => {
+  res.send('AI報告モニター稼働中');
+});
+
 cron.schedule('0 13 * * *', async () => {
   try {
     const sheets = getSheetsClient();
@@ -192,15 +143,11 @@ cron.schedule('0 13 * * *', async () => {
       spreadsheetId: SPREADSHEET_ID,
       range: 'タスク管理!A:O',
     });
-
     const rows = result.data.values || [];
     const today = new Date().toLocaleDateString('ja-JP');
-    
     const todayTasks = rows.slice(1).filter(row => row[1] === today && row[9] === '未着手');
     const pendingHighTasks = rows.slice(1).filter(row => row[9] === '未着手' && row[7] === '高' && row[1] !== today);
-
     let message = `*【本日のAI報告モニター】*\n\n`;
-
     if (todayTasks.length > 0) {
       message += `*■ 今日追加された重要案件*\n`;
       todayTasks.forEach((row, i) => {
@@ -209,14 +156,12 @@ cron.schedule('0 13 * * *', async () => {
     } else {
       message += `*■ 今日追加された重要案件*\nなし\n\n`;
     }
-
     if (pendingHighTasks.length > 0) {
       message += `*■ 未対応の高緊急度案件*\n`;
       pendingHighTasks.forEach(row => {
         message += `・${row[5]}（${row[2]}）\n`;
       });
     }
-
     await app.client.chat.postMessage({
       token: SLACK_BOT_TOKEN,
       channel: NOTIFY_USER_ID,
@@ -227,7 +172,6 @@ cron.schedule('0 13 * * *', async () => {
   }
 }, { timezone: 'Asia/Tokyo' });
 
-// サーバー起動
 (async () => {
   await app.start(process.env.PORT || 3000);
   console.log('AI報告モニター起動しました');
