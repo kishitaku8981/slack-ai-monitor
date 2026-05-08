@@ -30,6 +30,24 @@ function getSheetsClient() {
   return google.sheets({ version: 'v4', auth });
 }
 
+async function getUserName(client, userId) {
+  try {
+    const result = await client.users.info({ user: userId });
+    return result.user.profile.display_name || result.user.real_name || userId;
+  } catch {
+    return userId;
+  }
+}
+
+async function getChannelName(client, channelId) {
+  try {
+    const result = await client.conversations.info({ channel: channelId });
+    return result.channel.name || channelId;
+  } catch {
+    return channelId;
+  }
+}
+
 async function analyzeMessage(text, userName, channelName) {
   const response = await anthropic.messages.create({
     model: 'claude-opus-4-5',
@@ -67,7 +85,7 @@ async function analyzeMessage(text, userName, channelName) {
   });
   const content = response.content[0].text;
   const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-return JSON.parse(cleaned);
+  return JSON.parse(cleaned);
 }
 
 async function addToSheet(data) {
@@ -95,14 +113,16 @@ async function addToSheet(data) {
   return true;
 }
 
-app.event('app_mention', async ({ event }) => {
+app.event('app_mention', async ({ event, client }) => {
   try {
     const text = event.text;
-    const userName = event.user;
-    const channelName = event.channel;
+    const userId = event.user;
+    const channelId = event.channel;
     const ts = event.ts;
-    const slackUrl = `https://slack.com/archives/${channelName}/p${ts.replace('.', '')}`;
+    const slackUrl = `https://slack.com/archives/${channelId}/p${ts.replace('.', '')}`;
     const postDate = new Date(parseFloat(ts) * 1000).toLocaleDateString('ja-JP');
+    const userName = await getUserName(client, userId);
+    const channelName = await getChannelName(client, channelId);
     const analysis = await analyzeMessage(text, userName, channelName);
     if (analysis.needs_action) {
       await addToSheet({ postDate, channelName, userName, summary: analysis.summary, action: analysis.action, urgency: analysis.urgency, importance: analysis.importance, slackUrl, reason: analysis.reason });
@@ -112,18 +132,20 @@ app.event('app_mention', async ({ event }) => {
   }
 });
 
-app.event('message', async ({ event }) => {
+app.event('message', async ({ event, client }) => {
   try {
     if (event.subtype || event.bot_id) return;
     const text = event.text || '';
     const keywords = ['確認お願い', '判断お願い', '承認お願い', '相談', 'クレーム', '緊急', '至急'];
     const hasKeyword = keywords.some(kw => text.includes(kw));
     if (!hasKeyword) return;
-    const userName = event.user;
-    const channelName = event.channel;
+    const userId = event.user;
+    const channelId = event.channel;
     const ts = event.ts;
-    const slackUrl = `https://slack.com/archives/${channelName}/p${ts.replace('.', '')}`;
+    const slackUrl = `https://slack.com/archives/${channelId}/p${ts.replace('.', '')}`;
     const postDate = new Date(parseFloat(ts) * 1000).toLocaleDateString('ja-JP');
+    const userName = await getUserName(client, userId);
+    const channelName = await getChannelName(client, channelId);
     const analysis = await analyzeMessage(text, userName, channelName);
     if (analysis.needs_action) {
       await addToSheet({ postDate, channelName, userName, summary: analysis.summary, action: analysis.action, urgency: analysis.urgency, importance: analysis.importance, slackUrl, reason: analysis.reason });
